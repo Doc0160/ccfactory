@@ -1,0 +1,227 @@
+
+# Protocol
+JSON
+
+## C -> S login
+
+```json
+{ 
+	"addr": "",
+}
+```
+
+## S -> C
+```json
+{
+	"id": 0,
+	"action": "peripheral",
+	"args": [],
+}
+```
+
+## actions
+- log
+- peripheral
+- redstone ?
+- turtle
+- pocket
+
+
+## C -> S
+```json
+{ 
+	"id": 0,
+	"result": [],
+	"error": "",
+}
+```
+error = any
+
+
+
+#
+https://github.com/cyb0124/OCRemote
+
+https://github.com/cyb0124/CCRemote/
+
+/fill ~-100 ~-1 ~-100 ~100 ~-1 ~100 stone replace
+
+wget http://localhost:1847/startup.lua
+
+
+##
+
+package main
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+var nextID = 1
+var respChans = map[int]chan RemoteCallResult{}
+var wsConn = map[string]*websocket.Conn{}
+
+func a(conn string) RemoteCallResult {
+	id := nextID
+	nextID++
+
+	respCh := make(chan RemoteCallResult)
+	respChans[id] = respCh
+
+	for {
+		_, ok := wsConn[conn]
+		if ok {
+			break
+		}
+		time.Sleep(1 * time.Second)
+		log.Warn("missing client", "name", conn)
+	}
+	wsConn[conn].WriteJSON(RemoteCall{
+		ID:     id,
+		Action: ActionPeripheralCall,
+		Data: PeripheralCallData{
+			Name:   "minecraft:barrel_1",
+			Method: "list",
+			Args:   []any{},
+		},
+	})
+
+	resp := <-respCh
+	delete(respChans, id)
+	return resp
+}
+
+func main() {
+	fs := http.FileServer(http.Dir("../client"))
+	http.Handle("/", fs)
+
+	go func() {
+		log.Info("", "a", a("C1"))
+	}()
+
+	//conns := map[string]*websocket.Conn{}
+	//in_queues := map[string][]RemoteCallResult{}
+	//out_queues := map[string][]RemoteCall{}
+	//next_id := 1
+
+	// write thread
+	/*go func() {
+		for {
+			if len(conns) > 0 {
+				break
+			}
+		}
+		for k, v := range conns {
+			log.Debug("", "k", k)
+			v.WriteJSON(RemoteCall{
+				ID:     1,
+				Action: ActionLog,
+				Data: LogData{
+					Text:  "test",
+					Color: ColorPink,
+				},
+			})
+			v.WriteJSON(RemoteCall{
+				ID:     2,
+				Action: ActionPeripheralCall,
+				Data: PeripheralCallData{
+					Name:   "minecraft:barrel_1",
+					Method: "list",
+					Args:   []any{},
+				},
+			})
+		}
+	}()*/
+
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		log.Info("New connexion")
+
+		for {
+			r := RemoteCallResult{}
+			err := conn.ReadJSON(&r)
+			if err != nil {
+				break
+			}
+			log.Debug("", "r", r)
+			if r.ID == 0 {
+				wsConn[r.Result.(string)] = conn
+			} else {
+				if ch, ok := respChans[r.ID]; ok {
+					ch <- r
+				}
+			}
+
+			//fmt.Printf("recv: %s\n", msg)
+			//_ = mt
+			//conn.WriteMessage(mt, msg) // echo
+			//time.Sleep(10 * time.Second)
+		}
+	})
+
+	log.Info("Listening on http://localhost:1847")
+	http.ListenAndServe(":1847", nil)
+}
+
+type RemoteCallResult struct {
+	ID     int `json:"id"`
+	Result any `json:"result"`
+	Error  any `json:"error"`
+}
+type RemoteCall struct {
+	// See Action*
+	ID     int    `json:"id"`
+	Action Action `json:"action"`
+	Data   any    `json:"data"`
+}
+
+type LogData struct {
+	Text string `json:"text"`
+	// See Color*
+	Color Color `json:"color"`
+}
+
+type PeripheralCallData struct {
+	Name   string `json:"name"`
+	Method string `json:"method"`
+	Args   []any  `json:"args"`
+}
+
+type Color int
+
+const (
+	ColorWhite Color = iota
+	ColorOrange
+	ColorMagenta
+	ColorLightBlue
+	ColorYellow
+	ColorLime
+	ColorPink
+	ColoGray
+	ColorLightGray
+	ColorCyan
+	ColorPurple
+	ColorBlue
+	ColorBrown
+	ColorGreen
+	ColorRed
+	ColorBlack
+)
+
+type Action string
+
+const (
+	ActionLog            Action = "log"
+	ActionPeripheralCall        = "peripheral"
+)

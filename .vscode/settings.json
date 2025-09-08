@@ -1,0 +1,10 @@
+{
+    "Lua.diagnostics.disable": [
+        "undefined-field"
+    ],
+    "Lua.diagnostics.globals": [
+        "textutils",
+        "bit",
+        "http"
+    ]
+}
