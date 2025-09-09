@@ -31,8 +31,6 @@ func (f *Factory) StartServer() {
 	if f.Port == "" {
 		f.Port = "1847"
 	}
-	f.conns = map[string]*websocket.Conn{}
-	f.respChans = map[int]chan Response{}
 
 	fs := http.FileServer(http.Dir("../client"))
 	http.Handle("/", fs)

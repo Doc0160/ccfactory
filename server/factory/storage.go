@@ -6,4 +6,5 @@ type StorageConfig interface {
 
 type Storage interface {
 	Update()
+	Deposit(stack *DetailStack, busSlot int)
 }

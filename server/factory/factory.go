@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"ccfactory/server/heap"
 	"errors"
 	"time"
 
@@ -16,8 +17,15 @@ func (c *FactoryConfig) newFactory() *Factory {
 	return &Factory{
 		FactoryConfig: c,
 
+		conns:     map[string]*websocket.Conn{},
+		respChans: map[int]chan Response{},
+
+		item_storage: []Storage{},
+		processes:    []Process{},
+
 		nameMap:  map[string][]*Item{},
 		labelMap: map[string][]*Item{},
+		items:    map[*Item]*ItemInfo{},
 	}
 }
 
@@ -29,15 +37,47 @@ type Factory struct {
 	respChans map[int]chan Response
 
 	item_storage []Storage
-
-	processes []Process
+	processes    []Process
 
 	items    map[*Item]*ItemInfo
 	nameMap  map[string][]*Item
 	labelMap map[string][]*Item
 }
 
-func (f Factory) Log(text string, color int) {
+func (f *Factory) PullIntoBus(filter Filter, qty int) {
+	item, info := f.SearchItem(filter)
+	if item == nil {
+		f.Log("Item not found", 14)
+		return
+	}
+	log.Debug("", "item", item, "info", info)
+
+	for qty > 0 {
+		provider, ok := info.Providers.Peek()
+		if !ok {
+			f.Log("Item not found", 14)
+			return
+		}
+		log.Debug("", "provider", provider)
+
+		size := provider.Provided
+		if size > qty {
+			size = qty
+		}
+		qty -= size
+		log.Debug("", "extract", size, "qty", qty)
+		err := provider.Extract(size, 0)
+		provider.Provided -= size
+		if provider.Provided == 0 {
+			info.Providers.Pop()
+		}
+		if err != nil {
+			log.Error(err)
+		}
+	}
+}
+
+func (f *Factory) Log(text string, color int) {
 	if f.LogClients != nil {
 		for _, c := range f.LogClients {
 			f.LogMessage(c, text, color)
@@ -81,7 +121,7 @@ func (f Factory) Log(text string, color int) {
 	logFactory.Info(c + text + "\033[0m")
 }
 
-func (f *Factory) ClientConnected(conn string) bool {
+func (f *Factory) IsClientConnected(conn string) bool {
 	_, ok := f.conns[conn]
 	return ok
 }
@@ -101,6 +141,9 @@ func (f *Factory) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
 		Detail: detail,
 		Stored: 0,
 		Backup: 0,
+		Providers: heap.New(func(a, b Provider) bool {
+			return a.priority < b.priority
+		}),
 	}
 	return f.items[item]
 }
@@ -120,6 +163,8 @@ func (c *FactoryConfig) Build(fn func(*Factory)) {
 	go f.StartServer()
 
 	for {
+		time.Sleep(10 * time.Second)
+
 		// update inv
 		for _, inv := range f.item_storage {
 			inv.Update()
@@ -133,8 +178,27 @@ func (c *FactoryConfig) Build(fn func(*Factory)) {
 		// run processes
 
 		f.EndOfCycle()
-		time.Sleep(20 * time.Second)
 	}
+}
+
+func (f *Factory) SearchItem(filter Filter) (*Item, *ItemInfo) {
+	var itemInfo *ItemInfo = nil
+	var item *Item = nil
+	for i, info := range f.items {
+		if filter(i, info.Detail) {
+			if itemInfo == nil {
+				itemInfo = info
+				item = i
+				continue
+			}
+			if itemInfo.Stored >= info.Stored {
+				itemInfo = info
+				item = i
+				continue
+			}
+		}
+	}
+	return item, itemInfo
 }
 
 func (f *Factory) EndOfCycle() {
@@ -142,7 +206,7 @@ func (f *Factory) EndOfCycle() {
 
 	log.Debug("", "oak_log", f.nameMap["minecraft:oak_log"], "Oak Log", f.labelMap["Oak Log"])
 
-	log.Info(f.items)
+	log.Info("", "items", f.items)
 
 	f.labelMap = map[string][]*Item{}
 	f.nameMap = map[string][]*Item{}
@@ -157,7 +221,6 @@ func (f *Factory) LogMessage(conn string, str string, color int) *Response {
 		return nil
 	}
 
-	log.Debug("LogMessage")
 	id := f.nextId
 	f.nextId++
 
@@ -179,6 +242,7 @@ func (f *Factory) LogMessage(conn string, str string, color int) *Response {
 }
 
 func (f *Factory) CallPeripheral(conn string, args ...any) (RawMessage, error) {
+	log.Print(args)
 	id := f.nextId
 	f.nextId++
 

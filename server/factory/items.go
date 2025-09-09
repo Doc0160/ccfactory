@@ -1,11 +1,19 @@
 package factory
 
+import (
+	"ccfactory/server/heap"
+	"fmt"
+)
+
 type Item struct {
 	Name    string
 	NbtHash string
 }
 
 func (i *Item) String() string {
+	if i.NbtHash == "" {
+		return i.Name
+	}
 	return i.Name + ":" + i.NbtHash
 }
 
@@ -24,7 +32,13 @@ type ItemInfo struct {
 	Detail    *Detail
 	Stored    int
 	Backup    int
-	Providers BinaryHeap[Provider]
+	Providers *heap.Heap[Provider]
+}
+
+func (i *ItemInfo) String() string {
+	return fmt.Sprint("Detail=", i.Detail,
+		"; Stored=", i.Stored,
+		"; Providers=", i.Providers.Len())
 }
 
 func (i *ItemInfo) Provide(provider *Provider) {
@@ -32,38 +46,41 @@ func (i *ItemInfo) Provide(provider *Provider) {
 	if provided > 0 {
 		i.Stored += provided
 		i.Providers.Push(*provider)
-		provider.Extractor.Extract(1, 0)
 	}
 }
 
 type Provider struct {
-	Priority  int
-	Provided  int
-	Extractor Extractor
+	priority int
+	Provided int
+	Extract  Extractor
 }
 
-func (p Provider) Less(other Less) bool {
-	return p.Priority < other.(Provider).Priority
+func NewProvider(priority int, provided int, extractor Extractor) *Provider {
+	return &Provider{
+		priority: priority,
+		Provided: provided,
+		Extract:  extractor,
+	}
 }
 
-type Extractor interface {
-	Extract(size int, bus_slot int) error
+type Extractor func(size int, bus_slot int) error
+
+type Filter func(item *Item, detail *Detail) bool
+
+func FilterName(name string) Filter {
+	return func(item *Item, detail *Detail) bool {
+		return item.Name == name
+	}
 }
 
-/*
-type Item struct {
-	Name    string
-	NbtHash string
+func FilterLabel(label string) Filter {
+	return func(item *Item, detail *Detail) bool {
+		return detail.Label == label
+	}
 }
 
-type ItemInfo struct {
-	Detail  *Detail
-	NStored int32
-	NBackup int32
+func FilterBoth(name string, label string) Filter {
+	return func(item *Item, detail *Detail) bool {
+		return item.Name == name && detail.Label == label
+	}
 }
-
-type Detail struct {
-	Label   string
-	MaxSize int32
-}
-*/

@@ -13,7 +13,7 @@ type Chest struct {
 	factory *Factory
 
 	size   int
-	stacks []factory.DetailStack
+	stacks []*factory.DetailStack
 }
 
 var _ Storage = (*Chest)(nil)
@@ -24,7 +24,7 @@ func (c *ChestConfig) Build(f *Factory) Storage {
 		factory:     f,
 
 		size:   0,
-		stacks: []factory.DetailStack{},
+		stacks: []*factory.DetailStack{},
 	}
 }
 
@@ -84,10 +84,23 @@ func (c *Chest) GetItemDetail(slot int) (*ItemDetail, error) {
 	return detail, nil
 }
 
+func (c *Chest) Deposit(stack *factory.DetailStack, busSlot int) {
+	_, err := c.factory.CallPeripheral(c.Client,
+		c.BusAddr,
+		"pushItems",
+		c.InvAddr,
+		busSlot+1,
+		stack.Size,
+		0+1)
+	if err != nil {
+		log.Error(err)
+	}
+}
+
 func (c *Chest) Update() {
 	//skip not connected
-	if !c.factory.ClientConnected(c.Client) {
-		log.Warn("Client not connected", "client", c.Client)
+	if !c.factory.IsClientConnected(c.Client) {
+		c.factory.Log(c.Client+" not connected", 14)
 		return
 	}
 
@@ -96,19 +109,19 @@ func (c *Chest) Update() {
 	if err != nil {
 		log.Error(err)
 	}
-	c.stacks = make([]factory.DetailStack, c.size)
+	c.stacks = make([]*factory.DetailStack, c.size)
 
 	list, _ := c.List()
-	for i := 0; i < c.size; i++ {
-		if i >= len(list) {
+	for invSlot := 0; invSlot < c.size; invSlot++ {
+		if invSlot >= len(list) {
 			continue
 		}
-		item := list[i]
+		item := list[invSlot]
 		if item == nil {
 			continue
 		}
 
-		detail, err := c.GetItemDetail(i)
+		detail, err := c.GetItemDetail(invSlot)
 		if err != nil {
 			log.Error(err)
 		}
@@ -116,7 +129,7 @@ func (c *Chest) Update() {
 			continue
 		}
 
-		c.stacks[i] = factory.DetailStack{
+		c.stacks[invSlot] = &factory.DetailStack{
 			Item: &factory.Item{
 				Name:    item.Name,
 				NbtHash: item.Nbt,
@@ -129,51 +142,33 @@ func (c *Chest) Update() {
 		}
 
 		c.factory.
-			RegisterStoredItem(c.stacks[i].Item, c.stacks[i].Detail).
-			Provide(&factory.Provider{
-				Provided: item.Count,
-				Priority: -item.Count,
-				Extractor: &ChestExtractor{
-					Chest:   c,
-					invSlot: i,
-				},
-			})
+			RegisterStoredItem(c.stacks[invSlot].Item, c.stacks[invSlot].Detail).
+			Provide(factory.NewProvider(
+				item.Count,
+				item.Count,
+				func(size int, bus_slot int) error {
+					r, err := c.factory.CallPeripheral(c.Client, c.BusAddr,
+						"pullItems",
+						c.InvAddr,
+						invSlot+1,
+						size,
+						bus_slot+1)
+					if err != nil {
+						return err
+					}
+
+					i, err := Into[int](r)
+					if err != nil {
+						return err
+					}
+
+					c.stacks[invSlot].Size -= i
+					if c.stacks[invSlot].Size <= 0 {
+						c.stacks[invSlot] = nil
+					}
+
+					return nil
+				}))
 
 	}
-
-	//log.Debug("", "addr", c.config.InvAddr, "size", size)
-
-	//c.GetItemDetail(0)
-}
-
-type ChestExtractor struct {
-	*Chest
-	invSlot int
-}
-
-var _ factory.Extractor = (*ChestExtractor)(nil)
-
-func (ce ChestExtractor) Extract(size int, bus_slot int) error {
-	r, err := ce.factory.CallPeripheral(ce.Client, ce.BusAddr,
-		"pullItems",
-		ce.InvAddr,
-		ce.invSlot+1,
-		size,
-		bus_slot+1)
-	if err != nil {
-		return err
-	}
-
-	invStack := &ce.stacks[ce.invSlot]
-	i, err := Into[int](r)
-	if err != nil {
-		return err
-	}
-
-	invStack.Size -= i
-	if invStack.Size <= 0 {
-		invStack = nil
-	}
-
-	return nil
 }
