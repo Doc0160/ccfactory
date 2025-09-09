@@ -5,6 +5,10 @@
     "Lua.diagnostics.globals": [
         "textutils",
         "bit",
-        "http"
+        "http",
+        "turtle",
+        "peripheral",
+        "term",
+        "fs"
     ]
 }

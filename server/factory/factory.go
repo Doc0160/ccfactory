@@ -1,157 +1,155 @@
 package factory
 
 import (
-	"net/http"
-	"sync"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type FactoryConfig struct {
-	Port         string
-	MinCycleTime time.Duration
+	Port string
+}
+
+func (c *FactoryConfig) newFactory() *Factory {
+	return &Factory{
+		config: c,
+
+		nameMap:  map[string][]*Item{},
+		labelMap: map[string][]*Item{},
+	}
 }
 
 type Factory struct {
-	config FactoryConfig
-	//
-	itemStorage []Storage
-	// item storages
-	// fluid storage
-	// energy storage
-	//processes
-	// details cache ; nbt hash -> item details
+	config *FactoryConfig
+	nextId int
 
-	// server stuff
-	nextId           int
-	newIdMutex       sync.Mutex
-	responseChannels map[int]chan RemoteCallResult
-	connexions       map[string]*websocket.Conn
+	conns     map[string]*websocket.Conn
+	respChans map[int]chan Response
+
+	item_storage []Storage
+
+	items    map[*Item]*ItemInfo
+	nameMap  map[string][]*Item
+	labelMap map[string][]*Item
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
-func (c FactoryConfig) Build(fn func(*Factory)) {
-	if c.Port == "" {
-		c.Port = "1847"
-	}
-	if c.MinCycleTime < time.Second {
-		c.MinCycleTime = time.Second
-	}
-
-	f := &Factory{
-		config:           c,
-		newIdMutex:       sync.Mutex{},
-		responseChannels: map[int]chan RemoteCallResult{},
-		connexions:       map[string]*websocket.Conn{},
-		nextId:           1,
-		//
-		itemStorage: []Storage{},
-	}
-
-	fn(f)
-
-	fs := http.FileServer(http.Dir("../client"))
-	http.Handle("/", fs)
-
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		log.Info("Possible new connexion")
-
-		l := Login{}
-		err = conn.ReadJSON(&l)
-		if err != nil {
-			return
-		}
-		f.connexions[l.Addr] = conn
-		log.Info("New connexion", "addr", l.Addr)
-
-		for {
-			r := RemoteCallResult{}
-			err := conn.ReadJSON(&r)
-			if err != nil {
-				break
-			}
-			log.Debug("", "r", r)
-
-			if ch, ok := f.responseChannels[r.ID]; ok {
-				ch <- r
-			}
-		}
-	})
-
-	// cycle
-	go func() {
-		cycles := 0
-		for {
-			f.UpdateStorage()
-			//f.RunProcesses()
-
-			// take bus tasks and do it till 0
-			// todo: do
-			cycles++
-			time.Sleep(f.config.MinCycleTime)
-		}
-		/*for _, storage := f.itemStorage {
-			storage.Update()
-		}*/
-	}()
-
-	// websocket
-	log.Info("Listening on http://localhost:" + c.Port)
-	http.ListenAndServe(":"+c.Port, nil)
-}
-
-func (f *Factory) AddItemStorage(storage StorageConfig) {
-	f.itemStorage = append(f.itemStorage, storage.Build(f))
-}
-func (f *Factory) ClientConnected(client string) bool {
-	_, ok := f.connexions[client]
+func (f *Factory) ClientConnected(conn string) bool {
+	_, ok := f.conns[conn]
 	return ok
 }
 
-func (f *Factory) Call(addr string, args []any) RemoteCallResult {
-	f.newIdMutex.Lock()
+func (f *Factory) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
+	if _, ok := f.nameMap[item.Name]; !ok {
+		f.nameMap[item.Name] = []*Item{}
+	}
+	f.nameMap[item.Name] = append(f.nameMap[item.Name], item)
+
+	if _, ok := f.labelMap[detail.Label]; !ok {
+		f.labelMap[detail.Label] = []*Item{}
+	}
+	f.labelMap[detail.Label] = append(f.labelMap[detail.Label], item)
+
+	f.items[item] = &ItemInfo{
+		Detail: detail,
+		Stored: 0,
+		Backup: 0,
+	}
+	return f.items[item]
+}
+
+func (f *Factory) AddStorage(c StorageConfig) {
+	f.item_storage = append(f.item_storage, c.Build(f))
+}
+
+func (c *FactoryConfig) Build(fn func(*Factory)) {
+	f := c.newFactory()
+
+	fn(f)
+
+	go f.StartServer()
+
+	for {
+		// update inv
+		for _, inv := range f.item_storage {
+			inv.Update()
+		}
+
+		// run processes
+
+		f.EndOfCycle()
+		time.Sleep(20 * time.Second)
+	}
+}
+
+func (f *Factory) EndOfCycle() {
+	log.Debug("", "oak_log", f.nameMap["minecraft:oak_log"], "Oak Log", f.labelMap["Oak Log"])
+
+	log.Info(f.items)
+
+	f.labelMap = map[string][]*Item{}
+	f.nameMap = map[string][]*Item{}
+	f.items = map[*Item]*ItemInfo{}
+}
+
+func (f *Factory) LogMessage(conn string, str string, color int) *Response {
+	log.Debug("LogMessage")
 	id := f.nextId
 	f.nextId++
-	f.newIdMutex.Unlock()
 
-	call := RemoteCall{
-		ID:     id,
-		Action: ActionPeripheralCall,
-		Args:   args,
-	}
+	respCh := make(chan Response)
+	f.respChans[id] = respCh
 
-	respCh := make(chan RemoteCallResult)
-	f.responseChannels[id] = respCh
-
-	f.connexions[addr].WriteJSON(call)
+	f.conns[conn].WriteJSON(&Request{
+		Id:   id,
+		Type: "log",
+		Args: []any{struct {
+			Text  string `json:"text"`
+			Color int    `json:"color"`
+		}{str, color}},
+	})
 
 	resp := <-respCh
-	delete(f.responseChannels, id)
-	return resp
+	delete(f.respChans, id)
+	return &resp
 }
 
-func (f *Factory) UpdateStorage() {
-	// item
-	// foreach storage .Update()
-	for _, storage := range f.itemStorage {
-		storage.Update()
+func (f *Factory) CallPeripheral(conn string, args ...any) (RawMessage, error) {
+	id := f.nextId
+	f.nextId++
+
+	respCh := make(chan Response)
+	f.respChans[id] = respCh
+
+	f.conns[conn].WriteJSON(&Request{
+		Id:   id,
+		Type: "peripheral",
+		Args: args,
+	})
+
+	resp := <-respCh
+	delete(f.respChans, id)
+	if resp.Error != "" {
+		return nil, errors.New(resp.Error)
 	}
-
-	// fluid
-
-	// energy
+	return resp.Result, nil
 }
 
-// handle bus
-// loop
-// - update storages
-// - run processes
+type RawMessage = json.RawMessage
+
+/*func (r CallPeripheralResult) IntoInt() (int, error) {
+	var i int
+	err := json.Unmarshal(r, &i)
+	return i, err
+}*/
+
+/*func (r CallPeripheralResult) Into(v any) error {
+	return json.Unmarshal(r, v)
+}*/
+
+func Into[T any](r RawMessage) (T, error) {
+	var v T
+	err := json.Unmarshal(r, &v)
+	return v, err
+}

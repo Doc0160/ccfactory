@@ -13,9 +13,10 @@ label = label .. os.computerID()
 os.setComputerLabel(label)
 
 -- Export peripheral names
-local file = fs.open("peripherals.json","w")
+local file = fs.open("peripherals.json", "w")
 file.write(textutils.serializeJSON(peripheral.getNames()))
 file.close()
+
 
 -- Get terminals
 local terms = { term.native(), peripheral.find('monitor') }
@@ -24,61 +25,61 @@ for _, term in ipairs(terms) do
     term.height = select(2, term.getSize())
 end
 
--- log function
 local function log(packet)
+    if packet == nil then
+        return
+    end
+    if type(packet) == 'string' or type(packet) == 'number' then
+        packet = {t=packet, c=0}
+    end
     for _, term in ipairs(terms) do
         term.scroll(1)
         term.setCursorPos(1, term.height)
-        term.setTextColor(bit.blshift(1, packet.color or packet.c or 14))
+        term.setTextColor(bit.blshift(1, packet.color or packet.c or 0))
         term.write(packet.text or packet.t)
     end
 end
 
 local function exec(task, result)
-    --result.result = 'test'
-    if task.action == "log" then
-        log(task.data)
-    elseif task.action == "peripheral" then
-        result.result = {peripheral.call(table.unpack(task.data.args))}
-    elseif task.action == "turtle" then
-        local f = table.remove(task.data.args, l)
-        result.result = {turtle[f](table.unpack(task.data.args))}
+    if task.type == "log" then
+        log(task.args[1])
+    elseif task.type == "peripheral" then
+        result.result = peripheral.call(table.unpack(task.args))
+    elseif task.type == "turtle" then
+        local f = table.remove(task.args, l)
+        result.result = {turtle[f](table.unpack(task.args))}
     else
-        error('invalid action: ' .. tostring(task.action))
+        error('invalid type: ' .. tostring(task.type))
     end
     return 0
 end
 
---print("hello", url, clientName)
-
+--
 while true do
-    local tid = os.startTimer(3)
-    local url = url .. '#' .. tid
-    log({ text = 'Connecting to ' .. label .. '@' .. url, color = 4 })
     http.websocketAsync(url)
 
-    local socket
-    local event = { os.pullEvent() }
-    if event[1] == 'timer' then
-        if event[2] == tid then
-            log({ t = 'Timed out', c = 14 })
-        end
-    elseif event[1] == 'websocket_failure' then
-        if event[2] == url then
-            log({ text = 'Websocket failure', color = 14 })
-            os.sleep(5)
-        end
-    elseif event[1] == 'websocket_success' then
-        if event[2] == url then
-            socket = event[3]
+    local ws
+    while true do
+        local event = { os.pullEvent() }
+        if event[1] == 'websocket_failure' then
+            if event[2] == url then
+                log({t="websocket_failure " .. event[3], c=14})
+                os.sleep(1)
+                break
+            end
+        elseif event[1] == 'websocket_success' then
+            if event[2] == url then
+                log({t="websocket_success", c=5})
+                ws = event[3]
+                break
+            end
         end
     end
 
-    if socket then
-        log({ text = 'Websocket connected', color = 13 })
-
-        local out = {{addr = label,}}
+    if ws then
+        local out = {}
         local tasks = {}
+        table.insert(out, { client = label })
 
         local handler = function(data)
             local task = coroutine.create(exec)
@@ -86,14 +87,14 @@ while true do
             data = textutils.unserialiseJSON(data)
             local result = {
                 id = data.id,
-                result = nil,
+                result = {},
                 error = nil,
             }
             local success, filter = coroutine.resume(task, data, result)
             if not success then
                 result.result = nil
                 result.error = filter
-                --log({ text = filter, color = 14 })
+                log({ text = filter, color = 14 })
                 table.insert(out, result)
             elseif type(filter) == 'number' then
                 table.insert(out, result)
@@ -104,38 +105,42 @@ while true do
                     result = result,
                 })
             end
-            --todo call exec
         end
 
         while true do
             local success = true
             while #out > 0 do
-                local result
                 local to_send = textutils.serialiseJSON(table.remove(out, 1))
-                success, result = pcall(socket.send, to_send, true)
+                log(to_send)
+                local result
+                success, result = pcall(ws.send, to_send, true)
                 if not success then
-                    log({ text = result, color = 14 })
+                    log(result[0])
                     break
                 end
             end
             if not success then break end
 
             local event = { os.pullEvent() }
-            if event[1] == 'timer' then
-                if event[2] == tid then
-                    tid = nil
+            if event[1] == 'websocket_message' then
+                if event[2] == url then
+                    log("websocket_message " .. event[3])
+                    handler(event[3])
+                end
+            elseif event[1] == 'websocket_failure' then
+                if event[2] == url then
+                    log({t="websocket_failure", c=14})
+                    os.sleep(1)
+                    break
                 end
             elseif event[1] == 'websocket_closed' then
                 if event[2] == url then
-                    log({ text = "Websocket closed", color = 14 })
+                    log({t="websocket_closed", c=14})
+                    os.sleep(1)
                     break
                 end
-            elseif event[1] == 'websocket_message' then
-                if event[2] == url then
-                    handler(event[3])
-                end
             end
-
+            
             local newTasks = {}
             for _, v in ipairs(tasks) do
                 if not v.filter or v.filter == event[1] then
@@ -160,10 +165,7 @@ while true do
             end
             tasks = newTasks
         end
-        if tid then repeat local e = { os.pullEvent() } until e[1] ~= 'timer' or e[2] ~= tid end
     end
 end
 
---while true do
---os.sleep(5)
---end
+log("aaaaaa")
