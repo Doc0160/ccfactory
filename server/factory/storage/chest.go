@@ -5,25 +5,23 @@ import (
 )
 
 type ChestConfig struct {
-	Client  string
-	InvAddr string
-	BusAddr string
+	BusAccess
 }
 
 type Chest struct {
-	config  *ChestConfig
-	factory *factory.Factory
+	*ChestConfig
+	factory *Factory
 
 	size   int
 	stacks []factory.DetailStack
-
-	//items map[*Item]*Item
 }
 
-func (c *ChestConfig) Build(f *factory.Factory) factory.Storage {
+var _ Storage = (*Chest)(nil)
+
+func (c *ChestConfig) Build(f *Factory) Storage {
 	return &Chest{
-		config:  c,
-		factory: f,
+		ChestConfig: c,
+		factory:     f,
 
 		size:   0,
 		stacks: []factory.DetailStack{},
@@ -31,7 +29,7 @@ func (c *ChestConfig) Build(f *factory.Factory) factory.Storage {
 }
 
 func (c *Chest) Size() (int, error) {
-	sizeResult, err := c.factory.CallPeripheral(c.config.Client, c.config.InvAddr, "size")
+	sizeResult, err := c.factory.CallPeripheral(c.Client, c.InvAddr, "size")
 	if err != nil {
 		return -1, err
 	}
@@ -47,7 +45,7 @@ type ListItem struct {
 }
 
 func (c *Chest) List() ([]*ListItem, error) {
-	listResult, err := c.factory.CallPeripheral(c.config.Client, c.config.InvAddr, "list")
+	listResult, err := c.factory.CallPeripheral(c.Client, c.InvAddr, "list")
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +68,7 @@ type ItemDetail struct {
 }
 
 func (c *Chest) GetItemDetail(slot int) (*ItemDetail, error) {
-	detailResult, err := c.factory.CallPeripheral(c.config.Client, c.config.InvAddr, "getItemDetail", slot+1)
+	detailResult, err := c.factory.CallPeripheral(c.Client, c.InvAddr, "getItemDetail", slot+1)
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +86,8 @@ func (c *Chest) GetItemDetail(slot int) (*ItemDetail, error) {
 
 func (c *Chest) Update() {
 	//skip not connected
-	if !c.factory.ClientConnected(c.config.Client) {
-		log.Warn("Client not connected", "client", c.config.Client)
+	if !c.factory.ClientConnected(c.Client) {
+		log.Warn("Client not connected", "client", c.Client)
 		return
 	}
 
@@ -102,7 +100,7 @@ func (c *Chest) Update() {
 
 	list, _ := c.List()
 	for i := 0; i < c.size; i++ {
-		if i > len(list) {
+		if i >= len(list) {
 			continue
 		}
 		item := list[i]
@@ -136,7 +134,7 @@ func (c *Chest) Update() {
 				Provided: item.Count,
 				Priority: -item.Count,
 				Extractor: &ChestExtractor{
-					chest:   c,
+					Chest:   c,
 					invSlot: i,
 				},
 			})
@@ -149,16 +147,16 @@ func (c *Chest) Update() {
 }
 
 type ChestExtractor struct {
-	chest   *Chest
+	*Chest
 	invSlot int
 }
 
+var _ factory.Extractor = (*ChestExtractor)(nil)
+
 func (ce ChestExtractor) Extract(size int, bus_slot int) error {
-	config := ce.chest.config
-	chest := ce.chest
-	r, err := chest.factory.CallPeripheral(config.Client, config.BusAddr,
+	r, err := ce.factory.CallPeripheral(ce.Client, ce.BusAddr,
 		"pullItems",
-		config.InvAddr,
+		ce.InvAddr,
 		ce.invSlot+1,
 		size,
 		bus_slot+1)
@@ -166,7 +164,7 @@ func (ce ChestExtractor) Extract(size int, bus_slot int) error {
 		return err
 	}
 
-	invStack := &chest.stacks[ce.invSlot]
+	invStack := &ce.stacks[ce.invSlot]
 	i, err := Into[int](r)
 	if err != nil {
 		return err

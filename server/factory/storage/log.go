@@ -11,7 +11,7 @@ var log = _log.NewWithOptions(os.Stdout, _log.Options{
 	ReportCaller:    true,
 	ReportTimestamp: true,
 	TimeFormat:      time.DateTime,
-	Prefix:          "",
+	Prefix:          "📦",
 	Level:           _log.DebugLevel,
 	CallerFormatter: _log.LongCallerFormatter,
 })

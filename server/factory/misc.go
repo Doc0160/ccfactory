@@ -1,6 +1,9 @@
 package factory
 
-import "container/heap"
+import (
+	"container/heap"
+	"encoding/json"
+)
 
 type Less interface {
 	Less(other Less) bool
@@ -53,4 +56,12 @@ func (h BinaryHeap[T]) Push(x T) {
 
 func (h *BinaryHeap[T]) Remove() T {
 	return heap.Pop(&h.data).(T)
+}
+
+type RawMessage = json.RawMessage
+
+func Into[T any](r RawMessage) (T, error) {
+	var v T
+	err := json.Unmarshal(r, &v)
+	return v, err
 }

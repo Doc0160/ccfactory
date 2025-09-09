@@ -28,8 +28,8 @@ var upgrader = websocket.Upgrader{
 }
 
 func (f *Factory) StartServer() {
-	if f.config.Port == "" {
-		f.config.Port = "1847"
+	if f.Port == "" {
+		f.Port = "1847"
 	}
 	f.conns = map[string]*websocket.Conn{}
 	f.respChans = map[int]chan Response{}
@@ -51,7 +51,7 @@ func (f *Factory) StartServer() {
 			return
 		}
 		f.conns[l.Client] = conn
-		log.Debug("Login ", "client", l.Client)
+		log.Info("Login ", "client", l.Client)
 
 		for {
 			r := Response{}
@@ -68,6 +68,6 @@ func (f *Factory) StartServer() {
 
 	})
 
-	log.Info("Listening on http://localhost:" + f.config.Port)
-	http.ListenAndServe(":"+f.config.Port, nil)
+	log.Info("Listening on http://localhost:" + f.Port)
+	http.ListenAndServe(":"+f.Port, nil)
 }

@@ -19,11 +19,15 @@ file.close()
 
 
 -- Get terminals
-local terms = { term.native(), peripheral.find('monitor') }
-for _, term in ipairs(terms) do
-    if term.setTextScale then term.setTextScale(0.5) end
-    term.height = select(2, term.getSize())
+local terms = { term.native() }
+local function LoadTerms()
+    terms = { term.native(), peripheral.find('monitor') }
+    for _, term in ipairs(terms) do
+        if term.setTextScale then term.setTextScale(0.5) end
+        term.height = select(2, term.getSize())
+    end
 end
+LoadTerms()
 
 local function log(packet)
     if packet == nil then
@@ -83,7 +87,7 @@ while true do
 
         local handler = function(data)
             local task = coroutine.create(exec)
-            log({ text = data, color = 13 })
+            --log({ text = data, color = 13 })
             data = textutils.unserialiseJSON(data)
             local result = {
                 id = data.id,
@@ -111,7 +115,7 @@ while true do
             local success = true
             while #out > 0 do
                 local to_send = textutils.serialiseJSON(table.remove(out, 1))
-                log(to_send)
+                --log(to_send)
                 local result
                 success, result = pcall(ws.send, to_send, true)
                 if not success then
@@ -124,7 +128,7 @@ while true do
             local event = { os.pullEvent() }
             if event[1] == 'websocket_message' then
                 if event[2] == url then
-                    log("websocket_message " .. event[3])
+                    --log("websocket_message " .. event[3])
                     handler(event[3])
                 end
             elseif event[1] == 'websocket_failure' then
@@ -139,6 +143,8 @@ while true do
                     os.sleep(1)
                     break
                 end
+            elseif event[1] == 'peripheral' then
+                LoadTerms()
             end
             
             local newTasks = {}
@@ -167,5 +173,3 @@ while true do
         end
     end
 end
-
-log("aaaaaa")
