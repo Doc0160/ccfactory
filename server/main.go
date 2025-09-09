@@ -22,7 +22,7 @@ func main() {
 		f.AddStorage(&storage.ChestConfig{
 			BusAccess: factory.BusAccess{
 				Client:  "C0",
-				InvAddr: "minecraft:barrel_1",
+				InvAddr: "minecraft:barrel_3",
 				BusAddr: "dimstorage:dimensional_chest_0",
 			},
 		})
