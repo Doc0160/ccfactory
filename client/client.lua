@@ -1,5 +1,3 @@
-local url = ...
-
 -- Set Computer Label
 local label
 if turtle then
@@ -11,6 +9,7 @@ else
 end
 label = label .. os.computerID()
 os.setComputerLabel(label)
+local url = 'ws://127.0.0.1:1847/ws#'..label
 
 -- Export peripheral names
 local file = fs.open("peripherals.json", "w")
@@ -59,24 +58,30 @@ local function exec(task, result)
 end
 
 --
+log("Connecting to " + url)
 while true do
-    http.websocketAsync(url)
-
     local ws
+    local wait = 0
     while true do
+        http.websocketAsync(url)
         local event = { os.pullEvent() }
         if event[1] == 'websocket_failure' then
             if event[2] == url then
-                log({t="websocket_failure " .. event[3], c=14})
-                os.sleep(1)
-                break
+                log({t="websocket_failure: " .. event[3] .." ; wait "..wait, c=14})
+                os.sleep(wait)
+                if wait <= 20 then
+                    wait = wait + 1
+                end
             end
         elseif event[1] == 'websocket_success' then
             if event[2] == url then
                 log({t="websocket_success", c=5})
                 ws = event[3]
+                wait = 0
                 break
             end
+        else
+            log({t=event[1], c=13})
         end
     end
 
@@ -133,13 +138,13 @@ while true do
                 end
             elseif event[1] == 'websocket_failure' then
                 if event[2] == url then
-                    log({t="websocket_failure", c=14})
+                    log({t="websocket_failure " .. event[3], c=14})
                     os.sleep(1)
                     break
                 end
             elseif event[1] == 'websocket_closed' then
                 if event[2] == url then
-                    log({t="websocket_closed", c=14})
+                    log({t="websocket_closed " .. event[3], c=14})
                     os.sleep(1)
                     break
                 end
