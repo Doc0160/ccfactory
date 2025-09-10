@@ -7,9 +7,10 @@ import (
 )
 
 type DetailCache struct {
-	path  string
-	data  map[string]*Detail
-	mutex sync.RWMutex
+	path   string
+	data   map[string]*Detail
+	mutex  sync.RWMutex
+	saveCh chan struct{}
 }
 
 func NewDetailCache(path string) *DetailCache {
@@ -24,6 +25,21 @@ func NewDetailCache(path string) *DetailCache {
 		_ = gob.NewDecoder(file).Decode(&c.data)
 	}
 
+	go func() {
+		for range c.saveCh {
+		drain:
+			for {
+				select {
+				case <-c.saveCh:
+					// keep draining
+				default:
+					break drain
+				}
+			}
+			c.save()
+		}
+	}()
+
 	return c
 }
 
@@ -33,6 +49,9 @@ func (c *DetailCache) save() {
 		return
 	}
 	defer file.Close()
+
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	_ = gob.NewEncoder(file).Encode(c.data)
 }
 
@@ -50,7 +69,10 @@ func (c *DetailCache) Get(id string, fn func() *Detail) *Detail {
 	c.data[id] = data
 	c.mutex.Unlock()
 
-	go c.save()
+	select {
+	case c.saveCh <- struct{}{}:
+	default:
+	}
 
 	return data
 }
