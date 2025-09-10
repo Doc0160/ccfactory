@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
@@ -106,9 +107,7 @@ func (s *Server) Call(client_name string, request *Request) (RawMessage, error) 
 
 	}
 
-	id := s.nextId
-	s.nextId++
-	request.Id = id
+	id := int(atomic.AddInt64(&s.nextId, 1) - 1)
 
 	respCh := make(chan Response)
 	s.respChans[id] = respCh
@@ -120,8 +119,10 @@ func (s *Server) Call(client_name string, request *Request) (RawMessage, error) 
 	if resp.Error != "" {
 		return nil, errors.New(resp.Error)
 	}
-
 	if len(resp.Result) == 0 {
+		return nil, nil
+	}
+	if string(resp.Result) == "{}" {
 		return nil, nil
 	}
 
