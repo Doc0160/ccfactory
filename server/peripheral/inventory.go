@@ -54,6 +54,9 @@ func (p *Inventory) List() ([]*Item, error) {
 	if err != nil {
 		return nil, err
 	}
+	if response == nil {
+		return nil, nil
+	}
 
 	list, err := server.Into[[]*Item](response)
 	if err != nil {

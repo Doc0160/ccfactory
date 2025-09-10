@@ -5,15 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
 
 type Server struct {
-	Logins    map[string]*Client
-	respChans map[int]chan Response
-	nextId    int
+	Logins    sync.Map // map[string]*Client
+	respChans sync.Map // map[int]chan Response
+	nextId    int64
 }
 
 func NewServer(port int) *Server {
@@ -21,10 +22,7 @@ func NewServer(port int) *Server {
 		port = 1847
 	}
 
-	server := &Server{
-		Logins:    map[string]*Client{},
-		respChans: map[int]chan Response{},
-	}
+	server := &Server{}
 
 	fs := http.FileServer(http.Dir("../client"))
 	http.Handle("/", fs)
@@ -61,8 +59,8 @@ func NewServer(port int) *Server {
 				return
 			}
 
-			//log.Debug("Response ", "error ", r.Error, "result", string(r.Result))
-			if ch, ok := server.respChans[response.Id]; ok {
+			if chVal, ok := server.respChans.Load(response.Id); ok {
+				ch := chVal.(chan Response)
 				ch <- response
 			}
 		}
@@ -75,18 +73,26 @@ func NewServer(port int) *Server {
 }
 
 func (s *Server) NumClients() int {
-	return len(s.Logins)
+	count := 0
+	s.Logins.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 func (s *Server) Login(name string, client *Client) {
 	client.Login = name
 	log.Info("Login", "name", name)
-	if old, ok := s.Logins[name]; ok && old != nil {
-		log.Warn("Logged in from another address, closing old : " + client.Login)
-		old.Login = ""
-		old.Websocket.Close()
+
+	if old, ok := s.Logins.Load(name); ok && old != nil {
+		oldClient := old.(*Client)
+		log.Warn("Logged in from another address, closing old: " + oldClient.Login)
+		oldClient.Login = ""
+		oldClient.Close()
 	}
-	s.Logins[name] = client
+
+	s.Logins.Store(name, client)
 }
 
 type RawMessage = json.RawMessage
@@ -100,29 +106,29 @@ func Into[T any](r RawMessage) (T, error) {
 func (s *Server) Call(client_name string, request *Request) (RawMessage, error) {
 	if client_name == "" {
 		return nil, errors.New("client not found :" + client_name)
-
 	}
-	if ws, ok := s.Logins[client_name]; !ok || ws == nil {
-		return nil, errors.New("client not found :" + client_name)
 
+	wsVal, ok := s.Logins.Load(client_name)
+	if !ok || wsVal == nil {
+		return nil, errors.New("client not found: " + client_name)
 	}
+	ws := wsVal.(*Client)
 
 	id := int(atomic.AddInt64(&s.nextId, 1) - 1)
+	respCh := make(chan Response, 1)
+	s.respChans.Store(id, respCh)
 
-	respCh := make(chan Response)
-	s.respChans[id] = respCh
-
-	s.Logins[client_name].Websocket.WriteJSON(request)
+	request.Id = id
+	ws.WriteJSON(request)
 
 	resp := <-respCh
-	delete(s.respChans, id)
+
+	s.respChans.Delete(id)
+
 	if resp.Error != "" {
 		return nil, errors.New(resp.Error)
 	}
-	if len(resp.Result) == 0 {
-		return nil, nil
-	}
-	if string(resp.Result) == "{}" {
+	if len(resp.Result) == 0 || string(resp.Result) == "{}" {
 		return nil, nil
 	}
 
@@ -133,11 +139,18 @@ type Client struct {
 	Login     string
 	Server    *Server
 	Websocket *websocket.Conn
+	mutex     sync.Mutex
+}
+
+func (c *Client) WriteJSON(v interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.Websocket.WriteJSON(v)
 }
 
 func (c *Client) Close() {
 	log.Warn("Client closed", "name", c.Login)
-	c.Server.Logins[c.Login] = nil
+	c.Server.Logins.Delete(c.Login)
 	c.Websocket.Close()
 }
 

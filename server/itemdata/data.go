@@ -1,29 +1,24 @@
 package itemdata
 
 import (
-	"ccfactory/server/debug"
+	"sync"
 )
 
 type Data struct {
 	labelMap map[string][]*Item
 	nameMap  map[string][]*Item
-	items    map[string]*ItemInfo
+	items    sync.Map // map[string]*ItemInfo
 }
 
 func New() *Data {
 	return &Data{
 		labelMap: map[string][]*Item{},
 		nameMap:  map[string][]*Item{},
-		items:    map[string]*ItemInfo{},
 	}
 }
 
 func (d *Data) Clear() {
-	debug.Dump("items", d.items)
-	debug.Dump("itemsLabelMap", d.labelMap)
-	debug.Dump("itemsNameMap", d.nameMap)
-
-	d.items = map[string]*ItemInfo{}
+	d.items.Clear()
 	d.labelMap = map[string][]*Item{}
 	d.nameMap = map[string][]*Item{}
 }
@@ -55,16 +50,17 @@ func (d *Data) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
 		d.nameMap[name] = append(d.nameMap[name], item)
 	}
 
-	if _, ok := d.items[key]; !ok {
-		d.items[key] = &ItemInfo{
-			Item:      item,
-			Detail:    detail,
-			Providers: []*Provider{},
-		}
-		d.items[key].Init()
+	itemVal, loaded := d.items.LoadOrStore(key, &ItemInfo{
+		Item:      item,
+		Detail:    detail,
+		Providers: []*Provider{},
+	})
+
+	if !loaded {
+		itemVal.(*ItemInfo).Init()
 	}
 
-	return d.items[key]
+	return itemVal.(*ItemInfo)
 }
 
 func (d *Data) SearchItem(filter Filter) *ItemInfo {
@@ -74,7 +70,8 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 	case LabelFilter:
 		if items, ok := d.labelMap[f.Label]; ok {
 			for _, key := range items {
-				info := d.items[key.String()]
+				info_gen, _ := d.items.Load(key.String())
+				info := info_gen.(*ItemInfo)
 				if bestInfo != nil && info.Stored <= bestInfo.Stored {
 					continue
 				}
@@ -84,7 +81,8 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 	case NameFilter:
 		if items, ok := d.nameMap[f.Name]; ok {
 			for _, key := range items {
-				info := d.items[key.String()]
+				info_gen, _ := d.items.Load(key.String())
+				info := info_gen.(*ItemInfo)
 				if bestInfo != nil && info.Stored <= bestInfo.Stored {
 					continue
 				}
@@ -95,7 +93,8 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 		if items, ok := d.nameMap[f.Name]; ok {
 			for _, key := range items {
 				if key.Name == f.Name {
-					info := d.items[key.String()]
+					info_gen, _ := d.items.Load(key.String())
+					info := info_gen.(*ItemInfo)
 					if bestInfo != nil && info.Stored <= bestInfo.Stored {
 						continue
 					}
@@ -104,14 +103,16 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 			}
 		}
 	case CustomFiler:
-		for _, info := range d.items {
+		d.items.Range(func(key, info_gen any) bool {
+			info := info_gen.(*ItemInfo)
 			if f.Apply(info.Item, info.Detail) {
 				if bestInfo != nil && info.Stored <= bestInfo.Stored {
-					continue
+					return true
 				}
 				bestInfo = info
 			}
-		}
+			return true
+		})
 	}
 
 	return bestInfo

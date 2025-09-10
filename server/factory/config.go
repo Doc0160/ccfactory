@@ -8,8 +8,9 @@ import (
 )
 
 type FactoryConfig struct {
-	Server     *server.Server
-	LogClients []string
+	Server      *server.Server
+	DetailCache *itemdata.DetailCache
+	LogClients  []string
 }
 
 func (config *FactoryConfig) Build(builder func(*Factory)) {
@@ -24,8 +25,11 @@ func (config *FactoryConfig) Build(builder func(*Factory)) {
 
 	builder(factory)
 
-	for factory.Server.NumClients() == 0 {
+	for factory.Server.NumClients() < 2 {
 		time.Sleep(1 * time.Second)
 	}
+	factory.Cycle()
+
+	time.Sleep(1 * time.Second)
 	factory.Cycle()
 }

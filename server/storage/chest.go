@@ -10,10 +10,14 @@ type ChestConfig struct {
 	Access peripheral.BusAccess
 }
 
-func (config *ChestConfig) IntoChest(server *server.Server, itemdata *itemdata.Data) *Chest {
+func (config *ChestConfig) IntoChest(
+	server *server.Server,
+	itemdata *itemdata.Data,
+	detailCache *itemdata.DetailCache) *Chest {
 	return &Chest{
 		ChestConfig:    config,
-		GlobalItemData: itemdata,
+		globalItemData: itemdata,
+		detailCache:    detailCache,
 		inventory: &peripheral.Inventory{
 			BusAccess: config.Access,
 			Server:    server,
@@ -24,7 +28,8 @@ func (config *ChestConfig) IntoChest(server *server.Server, itemdata *itemdata.D
 type Chest struct {
 	*ChestConfig
 	inventory      *peripheral.Inventory
-	GlobalItemData *itemdata.Data
+	globalItemData *itemdata.Data
+	detailCache    *itemdata.DetailCache
 }
 
 type ItemDetail struct {
@@ -53,108 +58,48 @@ func (s *Chest) Update() error {
 		if list[i] == nil {
 			continue
 		}
-		item := list[i]
-
-		itemDetail, err := s.inventory.GetItemDetail(i)
-		if err != nil {
-			log.Error(err)
-			continue
+		pitem := list[i]
+		item := &itemdata.Item{
+			Name:    pitem.Name,
+			NbtHash: pitem.Nbt,
 		}
 
-		detail := itemdata.Detail{
-			Label:   itemDetail.Label,
-			MaxSize: itemDetail.MaxCount,
-			Other: itemdata.DetailOthers{
-				Tags:         itemDetail.Tags,
-				Damage:       itemDetail.Damage,
-				MaxDamage:    itemDetail.MaxDamage,
-				Durability:   itemDetail.Durability,
-				Enchantments: []itemdata.Enchantment{},
-			},
-		}
-		for _, e := range itemDetail.Enchantments {
-			detail.Other.Enchantments = append(detail.Other.Enchantments, itemdata.Enchantment{
-				Name:  e.Name,
-				Label: e.Label,
-				Level: e.Level,
-			})
-		}
+		detail := s.detailCache.Get(item.String(), func() *itemdata.Detail {
+			pdetail, err := s.inventory.GetItemDetail(i)
+			if err != nil {
+				log.Error(err)
+				return nil
+			}
 
-		s.GlobalItemData.RegisterStoredItem(&itemdata.Item{
-			Name:    item.Name,
-			NbtHash: item.Nbt,
-		}, &detail).Provide(&itemdata.Provider{
-			Priority: item.Count,
-			Provided: item.Count,
+			detail := &itemdata.Detail{
+				Label:   pdetail.Label,
+				MaxSize: pdetail.MaxCount,
+				Other: itemdata.DetailOthers{
+					Tags:         pdetail.Tags,
+					Damage:       pdetail.Damage,
+					MaxDamage:    pdetail.MaxDamage,
+					Durability:   pdetail.Durability,
+					Enchantments: []itemdata.Enchantment{},
+				},
+			}
+
+			for _, e := range pdetail.Enchantments {
+				detail.Other.Enchantments = append(detail.Other.Enchantments, itemdata.Enchantment{
+					Name:  e.Name,
+					Label: e.Label,
+					Level: e.Level,
+				})
+			}
+
+			return detail
+		})
+
+		s.globalItemData.RegisterStoredItem(item, detail).Provide(&itemdata.Provider{
+			Priority: pitem.Count,
+			Provided: pitem.Count,
 			Access:   s.Access.WithSlot(i),
 		})
 	}
 
 	return nil
 }
-
-/*
-func (s *Chest) List() ([]ItemDetail, error) {
-	size, err := s.inventory.Size()
-	if err != nil {
-		log.Error(err)
-		return nil, err
-	}
-	//og.Debug("", "size", size)
-
-	list, err := s.inventory.List()
-	if err != nil {
-		log.Error(err)
-		return nil, err
-	}
-	log.Debug("", "list", list)
-
-	info := []ItemDetail{}
-	for i := 0; i < size; i++ {
-		if list[i] == nil {
-			continue
-		}
-		item := list[i]
-
-		itemDetail, err := s.inventory.GetItemDetail(i)
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
-		log.Debug("", "detail", itemDetail)
-		detail := itemdata.Detail{
-			Label:   itemDetail.Label,
-			MaxSize: itemDetail.MaxCount,
-			Other: itemdata.DetailOthers{
-				Tags:         itemDetail.Tags,
-				Damage:       itemDetail.Damage,
-				MaxDamage:    itemDetail.MaxDamage,
-				Durability:   itemDetail.Durability,
-				Enchantments: []itemdata.Enchantment{},
-			},
-		}
-		for _, e := range itemDetail.Enchantments {
-			detail.Other.Enchantments = append(detail.Other.Enchantments, itemdata.Enchantment{
-				Name:  e.Name,
-				Label: e.Label,
-				Level: e.Level,
-			})
-		}
-
-		info = append(info, ItemDetail{
-			Item: itemdata.Item{
-				Name:    item.Name,
-				NbtHash: item.Nbt,
-			},
-			Detail: detail,
-			Provider: itemdata.Provider{
-				Priority: item.Count,
-				Provided: item.Count,
-				Access:   s.Access.WithSlot(i),
-			},
-		})
-	}
-
-	return info, nil
-}*/

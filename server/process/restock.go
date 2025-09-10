@@ -1,6 +1,6 @@
 package process
 
-import itemdata "ccfactory/server/itemData"
+import "ccfactory/server/itemdata"
 
 type Stock struct {
 	Item  itemdata.Filter

@@ -5,6 +5,7 @@ import (
 	"ccfactory/server/server"
 	"ccfactory/server/storage"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -21,17 +22,21 @@ type Factory struct {
 }
 
 func (f *Factory) AddItemStorage(config *storage.ChestConfig) {
-	f.ItemStorages = append(f.ItemStorages, config.IntoChest(f.Server, f.ItemData))
+	f.ItemStorages = append(f.ItemStorages, config.IntoChest(f.Server, f.ItemData, f.DetailCache))
 }
 
 func (factory *Factory) Cycle() {
 	factory.StartOffCycle()
 
-	//log.Debug(factory.ItemStorages)
+	var wg sync.WaitGroup
+	wg.Add(len(factory.ItemStorages))
 	for _, storage := range factory.ItemStorages {
-		storage.Update()
+		go func() {
+			defer wg.Done()
+			storage.Update()
+		}()
 	}
-	//log.Debug(factory.ItemData)
+	wg.Wait()
 
 	//info := factory.ItemData.SearchItem(itemdata.NameFilter{Name: "minecraft:torch"})
 	//log.Debug(info)

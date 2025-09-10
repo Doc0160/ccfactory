@@ -1,2 +1,3 @@
 server/tmp/*
 server/_old_factory/*
+*.gob
