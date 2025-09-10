@@ -58,7 +58,7 @@ local function exec(task, result)
 end
 
 --
-log("Connecting to " + url)
+log("Connecting to " .. url)
 while true do
     local ws
     local wait = 0
@@ -67,15 +67,15 @@ while true do
         local event = { os.pullEvent() }
         if event[1] == 'websocket_failure' then
             if event[2] == url then
-                log({t="websocket_failure: " .. event[3] .." ; wait "..wait, c=14})
+                log({t=event[3] ..", retry in " .. wait .. "s", c=14})
                 os.sleep(wait)
-                if wait <= 20 then
+                if wait <= 30 then
                     wait = wait + 1
                 end
             end
         elseif event[1] == 'websocket_success' then
             if event[2] == url then
-                log({t="websocket_success", c=5})
+                log({t="Connected", c=5})
                 ws = event[3]
                 wait = 0
                 break
@@ -136,15 +136,9 @@ while true do
                     --log("websocket_message " .. event[3])
                     handler(event[3])
                 end
-            elseif event[1] == 'websocket_failure' then
-                if event[2] == url then
-                    log({t="websocket_failure " .. event[3], c=14})
-                    os.sleep(1)
-                    break
-                end
             elseif event[1] == 'websocket_closed' then
                 if event[2] == url then
-                    log({t="websocket_closed " .. event[3], c=14})
+                    log({t="Connection closed: " .. event[3], c=14})
                     os.sleep(1)
                     break
                 end

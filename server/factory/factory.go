@@ -1,86 +1,67 @@
 package factory
 
 import (
-	"ccfactory/server/heap"
-	"errors"
+	"ccfactory/server/itemdata"
+	"ccfactory/server/server"
+	"ccfactory/server/storage"
+	"fmt"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
-
-type FactoryConfig struct {
-	Port       string
-	LogClients []string
-}
-
-func (c *FactoryConfig) newFactory() *Factory {
-	return &Factory{
-		FactoryConfig: c,
-
-		conns:     map[string]*websocket.Conn{},
-		respChans: map[int]chan Response{},
-
-		item_storage: []Storage{},
-		processes:    []Process{},
-
-		nameMap:  map[string][]*Item{},
-		labelMap: map[string][]*Item{},
-		items:    map[*Item]*ItemInfo{},
-	}
-}
 
 type Factory struct {
 	*FactoryConfig
-	nextId int
 
-	conns     map[string]*websocket.Conn
-	respChans map[int]chan Response
+	ItemStorages []*storage.Chest
 
-	item_storage []Storage
-	processes    []Process
+	ItemData *itemdata.Data
+	// item, qty, where (client, inv, slot)
 
-	items    map[*Item]*ItemInfo
-	nameMap  map[string][]*Item
-	labelMap map[string][]*Item
+	cycle int
+	start time.Time
 }
 
-func (f *Factory) PullIntoBus(filter Filter, qty int) {
-	item, info := f.SearchItem(filter)
-	if item == nil {
-		f.Log("Item not found", 14)
-		return
-	}
-	log.Debug("", "item", item, "info", info)
+func (f *Factory) AddItemStorage(config *storage.ChestConfig) {
+	f.ItemStorages = append(f.ItemStorages, config.IntoChest(f.Server, f.ItemData))
+}
 
-	for qty > 0 {
-		provider, ok := info.Providers.Peek()
-		if !ok {
-			f.Log("Item not found", 14)
-			return
-		}
-		log.Debug("", "provider", provider)
+func (factory *Factory) Cycle() {
+	factory.StartOffCycle()
 
-		size := provider.Provided
-		if size > qty {
-			size = qty
-		}
-		qty -= size
-		log.Debug("", "extract", size, "qty", qty)
-		err := provider.Extract(size, 0)
-		provider.Provided -= size
-		if provider.Provided == 0 {
-			info.Providers.Pop()
-		}
-		if err != nil {
-			log.Error(err)
-		}
+	//log.Debug(factory.ItemStorages)
+	for _, storage := range factory.ItemStorages {
+		storage.Update()
 	}
+	//log.Debug(factory.ItemData)
+
+	//info := factory.ItemData.SearchItem(itemdata.NameFilter{Name: "minecraft:torch"})
+	//log.Debug(info)
+
+	factory.EndOfCycle()
+}
+
+func (factory *Factory) StartOffCycle() {
+	factory.start = time.Now()
+	factory.cycle++
+	log.Info("Cycle started")
+}
+
+func (factory *Factory) EndOfCycle() {
+	factory.ItemData.Clear()
+
+	duration := time.Since(factory.start)
+	factory.Log(fmt.Sprintf("CCFactory #%d, cycle=%s", factory.cycle, duration), 1)
 }
 
 func (f *Factory) Log(text string, color int) {
 	if f.LogClients != nil {
 		for _, c := range f.LogClients {
-			f.LogMessage(c, text, color)
+			f.Server.Call(c, &server.Request{
+				Type: "log",
+				Args: []any{struct {
+					Text  string `json:"text"`
+					Color int    `json:"color"`
+				}{text, color}},
+			})
 		}
 	}
 	c := "\x1b[30m"
@@ -119,146 +100,4 @@ func (f *Factory) Log(text string, color int) {
 		c = "\x1b[30m"
 	}
 	logFactory.Info(c + text + "\033[0m")
-}
-
-func (f *Factory) IsClientConnected(conn string) bool {
-	_, ok := f.conns[conn]
-	return ok
-}
-
-func (f *Factory) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
-	if _, ok := f.nameMap[item.Name]; !ok {
-		f.nameMap[item.Name] = []*Item{}
-	}
-	f.nameMap[item.Name] = append(f.nameMap[item.Name], item)
-
-	if _, ok := f.labelMap[detail.Label]; !ok {
-		f.labelMap[detail.Label] = []*Item{}
-	}
-	f.labelMap[detail.Label] = append(f.labelMap[detail.Label], item)
-
-	f.items[item] = &ItemInfo{
-		Detail: detail,
-		Stored: 0,
-		Backup: 0,
-		Providers: heap.New(func(a, b Provider) bool {
-			return a.priority < b.priority
-		}),
-	}
-	return f.items[item]
-}
-
-func (f *Factory) AddStorage(c StorageConfig) {
-	f.item_storage = append(f.item_storage, c.Build(f))
-}
-func (f *Factory) AddProcess(c ProcessConfig) {
-	f.processes = append(f.processes, c.Build(f))
-}
-
-func (c *FactoryConfig) Build(fn func(*Factory)) {
-	f := c.newFactory()
-
-	fn(f)
-
-	go f.StartServer()
-
-	for {
-		time.Sleep(10 * time.Second)
-
-		// update inv
-		for _, inv := range f.item_storage {
-			inv.Update()
-		}
-
-		// run processes
-		for _, proc := range f.processes {
-			proc.Run()
-		}
-
-		// run processes
-
-		f.EndOfCycle()
-	}
-}
-
-func (f *Factory) SearchItem(filter Filter) (*Item, *ItemInfo) {
-	var itemInfo *ItemInfo = nil
-	var item *Item = nil
-	for i, info := range f.items {
-		if filter(i, info.Detail) {
-			if itemInfo == nil {
-				itemInfo = info
-				item = i
-				continue
-			}
-			if itemInfo.Stored >= info.Stored {
-				itemInfo = info
-				item = i
-				continue
-			}
-		}
-	}
-	return item, itemInfo
-}
-
-func (f *Factory) EndOfCycle() {
-	f.Log("Cycle ran", 1)
-
-	log.Debug("", "oak_log", f.nameMap["minecraft:oak_log"], "Oak Log", f.labelMap["Oak Log"])
-
-	log.Info("", "items", f.items)
-
-	f.labelMap = map[string][]*Item{}
-	f.nameMap = map[string][]*Item{}
-	f.items = map[*Item]*ItemInfo{}
-}
-
-func (f *Factory) LogMessage(conn string, str string, color int) *Response {
-	if conn == "" {
-		return nil
-	}
-	if _, ok := f.conns[conn]; !ok {
-		return nil
-	}
-
-	id := f.nextId
-	f.nextId++
-
-	respCh := make(chan Response)
-	f.respChans[id] = respCh
-
-	f.conns[conn].WriteJSON(&Request{
-		Id:   id,
-		Type: "log",
-		Args: []any{struct {
-			Text  string `json:"text"`
-			Color int    `json:"color"`
-		}{str, color}},
-	})
-
-	resp := <-respCh
-	delete(f.respChans, id)
-	return &resp
-}
-
-func (f *Factory) CallPeripheral(conn string, args ...any) (RawMessage, error) {
-	log.Print(args)
-	id := f.nextId
-	f.nextId++
-
-	respCh := make(chan Response)
-	f.respChans[id] = respCh
-
-	f.conns[conn].WriteJSON(&Request{
-		Id:   id,
-		Type: "peripheral",
-		Args: args,
-	})
-
-	resp := <-respCh
-	delete(f.respChans, id)
-	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
-	}
-	return resp.Result, nil
 }

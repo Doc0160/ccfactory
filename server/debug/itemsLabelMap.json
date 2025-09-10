@@ -1,0 +1,68 @@
+{
+  "'No Solicitors!' Sign": [
+    {
+      "Name": "gag:no_solicitors",
+      "NbtHash": ""
+    }
+  ],
+  "AlfredGG's Prized Trophy": [
+    {
+      "Name": "heads:wandering_trader_head",
+      "NbtHash": "67d3c02f52f4ce5bd484596de452ee38"
+    }
+  ],
+  "Angry Bee Statue": [
+    {
+      "Name": "statues:angry_bee_statue",
+      "NbtHash": "85612fe4eeb0262106109d1617c35594"
+    }
+  ],
+  "Cardboard Sword": [
+    {
+      "Name": "create:cardboard_sword",
+      "NbtHash": ""
+    }
+  ],
+  "Display Stand": [
+    {
+      "Name": "statues:display_stand",
+      "NbtHash": ""
+    }
+  ],
+  "Lead": [
+    {
+      "Name": "minecraft:lead",
+      "NbtHash": ""
+    }
+  ],
+  "Leather": [
+    {
+      "Name": "minecraft:leather",
+      "NbtHash": ""
+    }
+  ],
+  "Oak Log": [
+    {
+      "Name": "minecraft:oak_log",
+      "NbtHash": ""
+    }
+  ],
+  "Torch": [
+    {
+      "Name": "minecraft:torch",
+      "NbtHash": ""
+    }
+  ],
+  "White Trader Carpet": [
+    {
+      "Name": "utilitarian:white_soliciting_carpet",
+      "NbtHash": ""
+    }
+  ],
+  "Wooden Sword": [
+    {
+      "Name": "minecraft:wooden_sword",
+      "NbtHash": ""
+    }
+  ]
+}
