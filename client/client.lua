@@ -61,7 +61,7 @@ end
 log("Connecting to " .. url)
 while true do
     local ws
-    local wait = 0
+    local wait = 1
     while true do
         http.websocketAsync(url)
         local event = { os.pullEvent() }
@@ -69,7 +69,7 @@ while true do
             if event[2] == url then
                 log({t=event[3] ..", retry in " .. wait .. "s", c=14})
                 os.sleep(wait)
-                if wait <= 30 then
+                if wait < 30 then
                     wait = wait + 1
                 end
             end
@@ -77,7 +77,7 @@ while true do
             if event[2] == url then
                 log({t="Connected", c=5})
                 ws = event[3]
-                wait = 0
+                wait = 11
                 break
             end
         else

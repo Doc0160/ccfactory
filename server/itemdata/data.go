@@ -1,53 +1,83 @@
 package itemdata
 
 import (
+	"ccfactory/server/debug"
 	"sync"
 )
 
 type Data struct {
-	labelMap map[string][]*Item
-	nameMap  map[string][]*Item
-	items    sync.Map // map[string]*ItemInfo
+	labelMap *ItemSliceMap //map[string][]*Item
+	nameMap  *ItemSliceMap //map[string][]*Item
+	items    sync.Map      //map[string]*ItemInfo
+}
+
+type ItemSliceMap struct {
+	mu   sync.RWMutex
+	data map[string][]*Item
+}
+
+func NewItemSliceMap() *ItemSliceMap {
+	return &ItemSliceMap{
+		data: make(map[string][]*Item),
+	}
+}
+func (m *ItemSliceMap) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.data = map[string][]*Item{}
+}
+func (s *ItemSliceMap) Get(key string) []*Item {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data[key]
+}
+func (s *ItemSliceMap) Append(key string, item *Item) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = append(s.data[key], item)
 }
 
 func New() *Data {
 	return &Data{
-		labelMap: map[string][]*Item{},
-		nameMap:  map[string][]*Item{},
+		labelMap: NewItemSliceMap(),
+		nameMap:  NewItemSliceMap(),
 	}
 }
 
 func (d *Data) Clear() {
 	d.items.Clear()
-	d.labelMap = map[string][]*Item{}
-	d.nameMap = map[string][]*Item{}
+	d.labelMap.Clear()
+	d.nameMap.Clear()
 }
 
 func (d *Data) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
+	defer debug.Timer("RegisterStoredItem")()
+
 	label := detail.Label
 	name := item.Name
 	key := item.String()
 
 	found := false
-	for _, i := range d.labelMap[label] {
+	for _, i := range d.labelMap.Get(label) {
 		if i.String() == item.String() {
 			found = true
 			break
 		}
 	}
 	if !found {
-		d.labelMap[label] = append(d.labelMap[label], item)
+		d.labelMap.Append(label, item)
 	}
 
 	found = false
-	for _, i := range d.nameMap[name] {
+	for _, i := range d.nameMap.Get(name) {
 		if i.String() == item.String() {
 			found = true
 			break
 		}
 	}
 	if !found {
-		d.nameMap[name] = append(d.nameMap[name], item)
+		d.nameMap.Append(name, item)
 	}
 
 	itemVal, loaded := d.items.LoadOrStore(key, &ItemInfo{
@@ -64,11 +94,12 @@ func (d *Data) RegisterStoredItem(item *Item, detail *Detail) *ItemInfo {
 }
 
 func (d *Data) SearchItem(filter Filter) *ItemInfo {
-	var bestInfo *ItemInfo
+	defer debug.Timer("SearchItem")()
 
+	var bestInfo *ItemInfo
 	switch f := filter.(type) {
 	case LabelFilter:
-		if items, ok := d.labelMap[f.Label]; ok {
+		if items := d.labelMap.Get(f.Label); items != nil {
 			for _, key := range items {
 				info_gen, _ := d.items.Load(key.String())
 				info := info_gen.(*ItemInfo)
@@ -79,7 +110,7 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 			}
 		}
 	case NameFilter:
-		if items, ok := d.nameMap[f.Name]; ok {
+		if items := d.nameMap.Get(f.Name); items != nil {
 			for _, key := range items {
 				info_gen, _ := d.items.Load(key.String())
 				info := info_gen.(*ItemInfo)
@@ -90,7 +121,7 @@ func (d *Data) SearchItem(filter Filter) *ItemInfo {
 			}
 		}
 	case BothFilter:
-		if items, ok := d.nameMap[f.Name]; ok {
+		if items := d.nameMap.Get(f.Name); items != nil {
 			for _, key := range items {
 				if key.Name == f.Name {
 					info_gen, _ := d.items.Load(key.String())

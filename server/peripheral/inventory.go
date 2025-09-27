@@ -1,6 +1,8 @@
 package peripheral
 
 import (
+	"ccfactory/server/access"
+	"ccfactory/server/debug"
 	"ccfactory/server/server"
 )
 
@@ -9,17 +11,17 @@ type Into interface {
 }
 
 type Inventory struct {
-	Server    *server.Server
-	BusAccess BusAccess
+	Server *server.Server
+	Access access.BasicAccessInterface
 }
 
 func (p *Inventory) Size() (int, error) {
 	response, err := p.Server.Call(
-		p.BusAccess.Client,
+		p.Access.GetClient(),
 		&server.Request{
 			Type: "peripheral",
 			Args: []any{
-				p.BusAccess.InvAddr,
+				p.Access.GetAddr(),
 				"size",
 			},
 		})
@@ -43,19 +45,16 @@ type Item struct {
 
 func (p *Inventory) List() ([]*Item, error) {
 	response, err := p.Server.Call(
-		p.BusAccess.Client,
+		p.Access.GetClient(),
 		&server.Request{
 			Type: "peripheral",
 			Args: []any{
-				p.BusAccess.InvAddr,
+				p.Access.GetAddr(),
 				"list",
 			},
 		})
-	if err != nil {
+	if err != nil || response == nil {
 		return nil, err
-	}
-	if response == nil {
-		return nil, nil
 	}
 
 	list, err := server.Into[[]*Item](response)
@@ -85,12 +84,14 @@ type Enchantment struct {
 }
 
 func (p *Inventory) GetItemDetail(slot int) (*Detail, error) {
+	defer debug.Timer("GetItemDetail")()
+
 	response, err := p.Server.Call(
-		p.BusAccess.Client,
+		p.Access.GetClient(),
 		&server.Request{
 			Type: "peripheral",
 			Args: []any{
-				p.BusAccess.InvAddr,
+				p.Access.GetAddr(),
 				"getItemDetail",
 				slot + 1,
 			},
@@ -109,14 +110,4 @@ func (p *Inventory) GetItemDetail(slot int) (*Detail, error) {
 	}
 
 	return detail, nil
-}
-
-func (p *Inventory) PushItems(toName, fromSlot, limit, toSlot int) (int, error) {
-
-	return -1, nil
-}
-
-func (p *Inventory) PullItems(fromName, fromSlot, limit, toSlot int) (int, error) {
-
-	return -1, nil
 }

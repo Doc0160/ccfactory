@@ -46,7 +46,7 @@ func NewServer(port int) *Server {
 		var login Login
 		err = conn.ReadJSON(&login)
 		if err != nil {
-			log.Error("Websocket", "error", err)
+			log.Warn("Websocket", "error", err)
 			return
 		}
 		server.Login(login.Client, client)
@@ -55,7 +55,7 @@ func NewServer(port int) *Server {
 			var response Response
 			err = conn.ReadJSON(&response)
 			if err != nil {
-				log.Error(err)
+				log.Warn("Websocket", "error", err)
 				return
 			}
 
@@ -104,6 +104,9 @@ func Into[T any](r RawMessage) (T, error) {
 }
 
 func (s *Server) Call(client_name string, request *Request) (RawMessage, error) {
+	//defer debug.Timer("Call")()
+	//log.Debug(request)
+
 	if client_name == "" {
 		return nil, errors.New("client not found :" + client_name)
 	}
@@ -162,6 +165,10 @@ type Request struct {
 	Id   int    `json:"id"`
 	Type string `json:"type"`
 	Args []any  `json:"args"`
+}
+
+func (r *Request) String() string {
+	return fmt.Sprintf("Id=%d, Type=%s, Args=%v", r.Id, r.Type, r.Args)
 }
 
 type Response struct {

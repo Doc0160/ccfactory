@@ -2,23 +2,32 @@ package factory
 
 import (
 	"ccfactory/server/itemdata"
+	"ccfactory/server/misc"
+	"ccfactory/server/peripheral"
+	"ccfactory/server/process"
 	"ccfactory/server/server"
 	"ccfactory/server/storage"
 	"fmt"
-	"sync"
 	"time"
 )
 
 type Factory struct {
 	*FactoryConfig
+	Bus *Bus
 
 	ItemStorages []*storage.Chest
+	Processes    []process.Process
 
 	ItemData *itemdata.Data
-	// item, qty, where (client, inv, slot)
+
+	BusTasks []peripheral.BusTask
 
 	cycle int
 	start time.Time
+}
+
+func (f *Factory) AddProcess(config process.ProcessConfig) {
+	f.Processes = append(f.Processes, config.IntoProcess(f.Server, f.ItemData, f.DetailCache))
 }
 
 func (f *Factory) AddItemStorage(config *storage.ChestConfig) {
@@ -28,15 +37,32 @@ func (f *Factory) AddItemStorage(config *storage.ChestConfig) {
 func (factory *Factory) Cycle() {
 	factory.StartOffCycle()
 
-	var wg sync.WaitGroup
-	wg.Add(len(factory.ItemStorages))
+	p := misc.NewParrallel()
 	for _, storage := range factory.ItemStorages {
-		go func() {
-			defer wg.Done()
-			storage.Update()
-		}()
+		p.Add(func() {
+			err := storage.Update()
+			if err != nil {
+				log.Error(err)
+			}
+		})
 	}
-	wg.Wait()
+	p.Wait()
+
+	for _, process := range factory.Processes {
+		err := process.Run()
+		if err != nil {
+			log.Error(err)
+		}
+	}
+
+	factory.Bus.Update()
+
+	for _, task := range factory.BusTasks {
+		err := factory.Bus.Transfer(task)
+		if err != nil {
+			log.Error(err)
+		}
+	}
 
 	//info := factory.ItemData.SearchItem(itemdata.NameFilter{Name: "minecraft:torch"})
 	//log.Debug(info)
@@ -46,7 +72,6 @@ func (factory *Factory) Cycle() {
 
 func (factory *Factory) StartOffCycle() {
 	factory.start = time.Now()
-	factory.cycle++
 	log.Info("Cycle started")
 }
 
@@ -55,6 +80,7 @@ func (factory *Factory) EndOfCycle() {
 
 	duration := time.Since(factory.start)
 	factory.Log(fmt.Sprintf("CCFactory #%d, cycle=%s", factory.cycle, duration), 1)
+	factory.cycle++
 }
 
 func (f *Factory) Log(text string, color int) {

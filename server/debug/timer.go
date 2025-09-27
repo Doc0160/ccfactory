@@ -1,13 +1,16 @@
 package debug
 
 import (
-	"fmt"
 	"time"
 )
 
 func Timer(name string) func() {
+	//log.Debug("Starting timer", "name", name)
 	start := time.Now()
 	return func() {
-		fmt.Printf("%s took %v\n", name, time.Since(start))
+		duration := time.Since(start)
+		if duration > 0 {
+			log.Debug("Ending timer", "name", name, "duration", duration)
+		}
 	}
 }

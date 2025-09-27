@@ -1,13 +1,16 @@
 package storage
 
 import (
+	"ccfactory/server/access"
+	"ccfactory/server/debug"
 	"ccfactory/server/itemdata"
+	"ccfactory/server/misc"
 	"ccfactory/server/peripheral"
 	"ccfactory/server/server"
 )
 
 type ChestConfig struct {
-	Access peripheral.BusAccess
+	Access access.BusAccess
 }
 
 func (config *ChestConfig) IntoChest(
@@ -19,8 +22,8 @@ func (config *ChestConfig) IntoChest(
 		globalItemData: itemdata,
 		detailCache:    detailCache,
 		inventory: &peripheral.Inventory{
-			BusAccess: config.Access,
-			Server:    server,
+			Access: config.Access,
+			Server: server,
 		},
 	}
 }
@@ -39,32 +42,39 @@ type ItemDetail struct {
 }
 
 func (s *Chest) Update() error {
-	size, err := s.inventory.Size()
-	if err != nil {
-		log.Error(err)
-		return err
-	}
+	defer debug.Timer("chest.Update")()
 
-	list, err := s.inventory.List()
-	if err != nil {
-		log.Error(err)
-		return err
+	var size int
+	var sizeError error
+	var list []*peripheral.Item
+	var listError error
+
+	misc.DoParrallel(func() {
+		size, sizeError = s.inventory.Size()
+	}, func() {
+		list, listError = s.inventory.List()
+	})
+	if sizeError != nil {
+		log.Error(sizeError)
+		return sizeError
+	}
+	if listError != nil {
+		log.Error(listError)
+		return listError
 	}
 
 	for i := 0; i < size; i++ {
 		if i >= len(list) {
-			continue
+			break
 		}
 		if list[i] == nil {
 			continue
 		}
 		pitem := list[i]
-		item := &itemdata.Item{
-			Name:    pitem.Name,
-			NbtHash: pitem.Nbt,
-		}
+		item := itemdata.FromItem(pitem)
 
-		detail := s.detailCache.Get(item.String(), func() *itemdata.Detail {
+		detail := s.detailCache.GetOrSet(item.String(), func() *itemdata.Detail {
+			defer debug.Timer("detail")()
 			pdetail, err := s.inventory.GetItemDetail(i)
 			if err != nil {
 				log.Error(err)
@@ -97,7 +107,7 @@ func (s *Chest) Update() error {
 		s.globalItemData.RegisterStoredItem(item, detail).Provide(&itemdata.Provider{
 			Priority: pitem.Count,
 			Provided: pitem.Count,
-			Access:   s.Access.WithSlot(i),
+			//todo : Access:   s.Access.WithSlot(i),
 		})
 	}
 
